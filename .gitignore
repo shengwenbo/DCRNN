@@ -101,7 +101,11 @@ ENV/
 
 # pycharm
 .idea/
-data/metr-la.h5
 data/METR-LA/test.npz
 data/METR-LA/train.npz
 data/METR-LA/val.npz
+data/model/pretrained/METR-LA/checkpoint
+data/model/pretrained/METR-LA/config_65.yaml
+data/model/pretrained/METR-LA/events.out.tfevents.1572261516.DESKTOP-133SKKJ
+data/model/pretrained/METR-LA/models-2.7424-24750.data-00000-of-00001
+data/model/pretrained/METR-LA/models-2.7424-24750.index
