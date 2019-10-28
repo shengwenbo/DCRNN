@@ -44,7 +44,9 @@ class DCGRUCell(RNNCell):
         self._supports = []
         self._use_gc_for_ru = use_gc_for_ru
         supports = []
-        if filter_type == "laplacian":
+        if filter_type == "dense_laplacian":
+            supports.append(utils.calculate_scaled_laplacian_dense(adj_mx, lambda_max=None))
+        elif filter_type == "laplacian":
             supports.append(utils.calculate_scaled_laplacian(adj_mx, lambda_max=None))
         elif filter_type == "random_walk":
             supports.append(utils.calculate_random_walk_matrix(adj_mx).T)
@@ -182,3 +184,99 @@ class DCGRUCell(RNNCell):
             x = tf.nn.bias_add(x, biases)
         # Reshape res back to 2D: (batch_size, num_node, state_dim) -> (batch_size, num_node * state_dim)
         return tf.reshape(x, [batch_size, self._num_nodes * output_size])
+
+    # def _gat(self, inputs, state, output_size, bias_start=0.0):
+    #     """Graph attention between input and the graph matrix.
+    #
+    #            :param args: a 2D Tensor or a list of 2D, batch x n, Tensors.
+    #            :param output_size:
+    #            :param bias:
+    #            :param bias_start:
+    #            :param scope:
+    #            :return:
+    #            """
+    #     # Reshape input and state to (batch_size, num_nodes, input_dim/state_dim)
+    #     batch_size = inputs.get_shape()[0].value
+    #     inputs = tf.reshape(inputs, (batch_size, self._num_nodes, -1))
+    #     state = tf.reshape(state, (batch_size, self._num_nodes, -1))
+    #     inputs_and_state = tf.concat([inputs, state], axis=2)
+    #     input_size = inputs_and_state.get_shape()[2].value
+    #     dtype = inputs.dtype
+    #
+    #     x = inputs_and_state
+    #     x0 = tf.transpose(x, perm=[1, 2, 0])  # (num_nodes, total_arg_size, batch_size)
+    #     x0 = tf.reshape(x0, shape=[self._num_nodes, input_size * batch_size])
+    #     x = tf.expand_dims(x0, axis=0) # (1, num_nodes, total_arg_size * batch_size)
+    #
+    #     scope = tf.get_variable_scope()
+    #     with tf.variable_scope(scope):
+    #         attns = []
+    #         for i in range(n_heads[0]):
+    #             attns.append(self._attn_head(inputs, bias_mat=bias_mat,
+    #                                           split_parts=split_parts[0],
+    #                                           out_sz=hid_units[0], activation=activation,
+    #                                           in_drop=ffd_drop, coef_drop=attn_drop, residual=False,
+    #                                           name="attn_{}_{}".format("in", i))[0])
+    #         h_1 = tf.concat(attns, axis=-1)
+    #         for i in range(1, len(hid_units)):
+    #             h_old = h_1
+    #             attns = []
+    #             for j in range(n_heads[i]):
+    #                 attns.append(self._attn_head(h_1, bias_mat=bias_mat,
+    #                                               split_parts=split_parts[i],
+    #                                               out_sz=hid_units[i], activation=activation,
+    #                                               in_drop=ffd_drop, coef_drop=attn_drop, residual=residual,
+    #                                               name="attn_{}_{}".format(i, j))[0])
+    #             h_1 = tf.concat(attns, axis=-1)
+    #
+    #         out = []
+    #         for i in range(n_heads[-1]):
+    #             out.append(self._attn_head(h_1, bias_mat=bias_mat,
+    #                                          split_parts=split_parts[-1],
+    #                                          out_sz=output_size, activation=lambda x: x,
+    #                                          in_drop=ffd_drop, coef_drop=attn_drop, residual=False,
+    #                                          name="attn_{}_{}".format("out", i)))
+    #
+    #         logits = tf.add_n(out) / n_heads[-1]
+    #
+    #     # Reshape res back to 2D: (batch_size, num_node, state_dim) -> (batch_size, num_node * state_dim)
+    #     return tf.reshape(x, [batch_size, self._num_nodes * output_size])
+
+    def _attn_head(self, seq, out_sz, activation, bias_mat=None,split_parts=2,
+                  in_drop=0.0, coef_drop=0.0, residual=False, name="attn"):
+        n_nodes = seq.shape[1]
+        with tf.name_scope('my_attn'):
+            if in_drop != 0.0:
+                seq = tf.nn.dropout(seq, 1.0 - in_drop)
+
+            seq_fts_sp = []
+            for _ in range(split_parts):
+                seq_fts_sp.append(tf.expand_dims(tf.layers.conv1d(seq, out_sz, 1, use_bias=False), 0))
+            seq_fts_sp = tf.concat(seq_fts_sp, 0)
+            seq_fts = tf.reduce_mean(seq_fts_sp, 0)
+
+            # simplest self-attention possible
+            f_1 = tf.layers.conv1d(seq_fts, 1, 1)  # [bs, n, 1]
+            f_2 = tf.reshape(seq_fts_sp, [-1, n_nodes, out_sz])  # [sp*bs, n, d]
+            f_2 = tf.layers.conv1d(f_2, 1, 1)  # [sp*bs, n, 1]
+            f_2 = tf.reshape(f_2, [split_parts, -1, n_nodes, 1])  # [sp, bs, n, 1]
+            logits = tf.expand_dims(f_1, 0) + tf.transpose(f_2, [0, 1, 3, 2])  # [sp, bs, n, n]
+            in_coefs = tf.nn.softmax(tf.nn.leaky_relu(logits), axis=0)  # [sp, bs, n, n]
+            logits = in_coefs * logits
+            if bias_mat is not None:
+                coefs = tf.nn.softmax(tf.nn.leaky_relu(tf.reduce_sum(logits, axis=0)) + bias_mat)  # [bs, n, n]
+            else:
+                coefs = tf.nn.softmax(tf.nn.leaky_relu(tf.reduce_sum(logits, axis=0)))  # [bs, n, n]
+            coefs = tf.expand_dims(coefs, 0)  # [1, bs, n, n]
+            coefs = coefs * in_coefs  # [sp, bs, n, n]
+
+            if coef_drop != 0.0:
+                coefs = tf.nn.dropout(coefs, 1.0 - coef_drop)
+            if in_drop != 0.0:
+                seq_fts_sp = tf.nn.dropout(seq_fts_sp, 1.0 - in_drop)
+
+            vals = tf.matmul(coefs, seq_fts_sp)  # [sp, bs, n, b]
+            vals = tf.reduce_sum(vals, 0)  # [bs, n, b]
+            ret = tf.contrib.layers.bias_add(vals)
+
+            return activation(ret)  # activation

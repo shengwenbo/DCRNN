@@ -1,9 +1,10 @@
 base_dir: data/model
 log_level: INFO
+gpu: 0
 data:
   batch_size: 64
   dataset_dir: data/METR-LA
-  graph_pkl_filename: data/sensor_graph/adj_mx.pkl
+  graph_pkl_filename: data/sensor_graph/adj_mx_unix.pkl
   test_batch_size: 64
 model:
   cl_decay_steps: 2000

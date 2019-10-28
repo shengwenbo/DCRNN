@@ -126,6 +126,21 @@ def calculate_scaled_laplacian(adj_mx, lambda_max=2, undirected=True):
     return L.astype(np.float32)
 
 
+def calculate_scaled_laplacian_dense(adj_mx, lambda_max=2, undirected=True):
+    if undirected:
+        adj_mx = np.maximum.reduce([adj_mx, adj_mx.T])
+    L = calculate_normalized_laplacian(adj_mx)
+    if lambda_max is None:
+        lambda_max, _ = linalg.eigsh(L, 1, which='LM')
+        lambda_max = lambda_max[0]
+    L = sp.csr_matrix(L)
+    M, _ = L.shape
+    I = sp.identity(M, format='csr', dtype=L.dtype)
+    L = (2 / lambda_max * L) - I
+    L = L.todense()
+    return L.astype(np.float32)
+
+
 def config_logging(log_dir, log_filename='info.log', level=logging.INFO):
     # Add file handler and stdout handler
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -202,7 +217,7 @@ def load_graph_data(pkl_filename):
 def load_pickle(pickle_file):
     try:
         with open(pickle_file, 'rb') as f:
-            pickle_data = pickle.load(f)
+            pickle_data = pickle.load(f, encoding='latin1')
     except UnicodeDecodeError as e:
         with open(pickle_file, 'rb') as f:
             pickle_data = pickle.load(f, encoding='latin1')

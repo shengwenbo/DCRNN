@@ -16,6 +16,7 @@ def run_dcrnn(args):
     if args.use_cpu_only:
         tf_config = tf.ConfigProto(device_count={'GPU': 0})
     tf_config.gpu_options.allow_growth = True
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(config['gpu'])
     graph_pkl_filename = config['data']['graph_pkl_filename']
     _, _, adj_mx = load_graph_data(graph_pkl_filename)
     with tf.Session(config=tf_config) as sess:

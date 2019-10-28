@@ -101,3 +101,7 @@ ENV/
 
 # pycharm
 .idea/
+data/metr-la.h5
+data/METR-LA/test.npz
+data/METR-LA/train.npz
+data/METR-LA/val.npz
