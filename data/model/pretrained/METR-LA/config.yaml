@@ -19,9 +19,9 @@ model:
   rnn_units: 64
   seq_len: 12
   use_curriculum_learning: true
-  nheads: [4, 4]
-  hid_units: [16]
-  split_parts: [4, 4]
+  nheads: [4, 4, 4]
+  hid_units: [16, 8]
+  split_parts: [4, 4, 4]
   ffd_drop: 0.6
   attn_drop: 0.6
 train:
