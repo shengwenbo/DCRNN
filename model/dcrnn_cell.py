@@ -46,7 +46,7 @@ class DCGRUCell(RNNCell):
         supports = []
         if filter_type == "dense_laplacian":
             supports.append(utils.calculate_scaled_laplacian_bias_dense(adj_mx, lambda_max=None))
-            self.nheads = nheads
+            self.n_heads = nheads
             self.hid_units = hid_units
             self.split_parts = split_parts
             self.ffd_drop = ffd_drop
@@ -60,8 +60,12 @@ class DCGRUCell(RNNCell):
             supports.append(utils.calculate_random_walk_matrix(adj_mx.T).T)
         else:
             supports.append(utils.calculate_scaled_laplacian(adj_mx))
-        for support in supports:
-            self._supports.append(self._build_sparse_matrix(support))
+
+        if filter_type != "dense_laplacian":
+            for support in supports:
+                self._supports.append(self._build_sparse_matrix(support))
+        else:
+            self._supports = supports
 
     @staticmethod
     def _build_sparse_matrix(L):
@@ -95,7 +99,7 @@ class DCGRUCell(RNNCell):
                 output_size = 2 * self._num_units
                 # We start with bias of 1.0 to not reset and not update.
                 if self._use_gc_for_ru:
-                    fn = self._gconv
+                    fn = self._gat
                 else:
                     fn = self._fc
                 value = tf.nn.sigmoid(fn(inputs, state, output_size, bias_start=1.0))
@@ -104,7 +108,7 @@ class DCGRUCell(RNNCell):
                 r = tf.reshape(r, (-1, self._num_nodes * self._num_units))
                 u = tf.reshape(u, (-1, self._num_nodes * self._num_units))
             with tf.variable_scope("candidate"):
-                c = self._gconv(inputs, r * state, self._num_units)
+                c = self._gat(inputs, r * state, self._num_units)
                 if self._activation is not None:
                     c = self._activation(c)
             output = new_state = u * state + (1 - u) * c
@@ -209,19 +213,19 @@ class DCGRUCell(RNNCell):
         dtype = inputs.dtype
 
         x = inputs_and_state
-        x0 = tf.transpose(x, perm=[1, 2, 0])  # (num_nodes, total_arg_size, batch_size)
-        x0 = tf.reshape(x0, shape=[self._num_nodes, input_size * batch_size])
-        x = tf.expand_dims(x0, axis=0) # (1, num_nodes, total_arg_size * batch_size)
+        # x0 = tf.transpose(x, perm=[1, 2, 0])  # (num_nodes, total_arg_size, batch_size)
+        # x0 = tf.reshape(x0, shape=[self._num_nodes, input_size * batch_size])
+        # x = tf.expand_dims(x0, axis=0) # (1, num_nodes, total_arg_size * batch_size)
 
         scope = tf.get_variable_scope()
         with tf.variable_scope(scope):
             attns = []
             for i in range(self.n_heads[0]):
-                attns.append(self._attn_head(inputs, bias_mat=self._supports[0],
+                attns.append(self._attn_head(x, bias_mat=self._supports[0],
                                               split_parts=self.split_parts[0],
                                               out_sz=self.hid_units[0], activation=lambda x: x,
                                               in_drop=self.ffd_drop, coef_drop=self.attn_drop, residual=False,
-                                              name="attn_{}_{}".format("in", i))[0])
+                                              name="attn_{}_{}".format("in", i)))
             h_1 = tf.concat(attns, axis=-1)
             for i in range(1, len(self.hid_units)):
                 h_old = h_1
@@ -231,7 +235,7 @@ class DCGRUCell(RNNCell):
                                                   split_parts=self.split_parts[i],
                                                   out_sz=self.hid_units[i], activation=lambda x: x,
                                                   in_drop=self.ffd_drop, coef_drop=self.attn_drop, residual=False,
-                                                  name="attn_{}_{}".format(i, j))[0])
+                                                  name="attn_{}_{}".format(i, j)))
                 h_1 = tf.concat(attns, axis=-1)
 
             out = []
@@ -245,7 +249,7 @@ class DCGRUCell(RNNCell):
             logits = tf.add_n(out) / self.n_heads[-1]
 
         # Reshape res back to 2D: (batch_size, num_node, state_dim) -> (batch_size, num_node * state_dim)
-        return tf.reshape(x, [batch_size, self._num_nodes * output_size])
+        return tf.reshape(logits, [batch_size, self._num_nodes * output_size])
 
     def _attn_head(self, seq, out_sz, activation, bias_mat=None,split_parts=2,
                   in_drop=0.0, coef_drop=0.0, residual=False, name="attn"):
@@ -284,3 +288,4 @@ class DCGRUCell(RNNCell):
             vals = tf.reduce_sum(vals, 0)  # [bs, n, b]
             ret = tf.contrib.layers.bias_add(vals)
 
+            return ret

@@ -137,9 +137,8 @@ def calculate_scaled_laplacian_bias_dense(adj_mx, lambda_max=2, undirected=True)
     M, _ = L.shape
     I = sp.identity(M, format='csr', dtype=L.dtype)
     L = (2 / lambda_max * L) - I
-    L = L.todense()
-
-    return L.astype(np.float32)
+    L = ((L==0).astype(np.float32).todense())
+    return L * -1e9
 
 
 def config_logging(log_dir, log_filename='info.log', level=logging.INFO):
