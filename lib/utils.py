@@ -126,7 +126,7 @@ def calculate_scaled_laplacian(adj_mx, lambda_max=2, undirected=True):
     return L.astype(np.float32)
 
 
-def calculate_scaled_laplacian_dense(adj_mx, lambda_max=2, undirected=True):
+def calculate_scaled_laplacian_bias_dense(adj_mx, lambda_max=2, undirected=True):
     if undirected:
         adj_mx = np.maximum.reduce([adj_mx, adj_mx.T])
     L = calculate_normalized_laplacian(adj_mx)
@@ -138,6 +138,7 @@ def calculate_scaled_laplacian_dense(adj_mx, lambda_max=2, undirected=True):
     I = sp.identity(M, format='csr', dtype=L.dtype)
     L = (2 / lambda_max * L) - I
     L = L.todense()
+
     return L.astype(np.float32)
 
 

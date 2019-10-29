@@ -33,6 +33,16 @@ class DCRNNModel(object):
         input_dim = int(model_kwargs.get('input_dim', 1))
         output_dim = int(model_kwargs.get('output_dim', 1))
 
+        if filter_type == "dense_laplacian":
+            nheads = model_kwargs.get('nheads', [8, 1])
+            nheads = [int(a) for a in nheads]
+            hid_units = model_kwargs.get('hid_units', [8])
+            hid_units = [int(a) for a in hid_units]
+            split_parts = model_kwargs.get('split_parts', [4, 4])
+            split_parts = [int(a) for a in split_parts]
+            ffd_drop = float(model_kwargs.get('ffd_drop', 0.6))
+            attn_drop = float(model_kwargs.get('attn_drop', 0.6))
+
         # Input (batch_size, timesteps, num_sensor, input_dim)
         self._inputs = tf.placeholder(tf.float32, shape=(batch_size, seq_len, num_nodes, input_dim), name='inputs')
         # Labels: (batch_size, timesteps, num_sensor, input_dim), same format with input except the temporal dimension.
@@ -42,7 +52,7 @@ class DCRNNModel(object):
         GO_SYMBOL = tf.zeros(shape=(batch_size, num_nodes * output_dim))
 
         cell = DCGRUCell(rnn_units, adj_mx, max_diffusion_step=max_diffusion_step, num_nodes=num_nodes,
-                         filter_type=filter_type)
+                         filter_type=filter_type, nheads=nheads, hid_units=hid_units, split_parts=split_parts, ffd_drop=ffd_drop, attn_drop=attn_drop)
         cell_with_projection = DCGRUCell(rnn_units, adj_mx, max_diffusion_step=max_diffusion_step, num_nodes=num_nodes,
                                          num_proj=output_dim, filter_type=filter_type)
         encoding_cells = [cell] * num_rnn_layers
