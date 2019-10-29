@@ -21,7 +21,7 @@ class DCGRUCell(RNNCell):
         pass
 
     def __init__(self, num_units, adj_mx, max_diffusion_step, num_nodes, nheads=None, hid_units=None, split_parts=None, ffd_drop=None, attn_drop=None, num_proj=None,
-                 activation=tf.nn.tanh, reuse=None, filter_type="laplacian", use_gc_for_ru=True):
+                 activation=tf.nn.tanh, reuse=None, filter_type="laplacian", use_gc_for_ru=False):
         """
 
         :param num_units:
@@ -223,9 +223,9 @@ class DCGRUCell(RNNCell):
             for i in range(self.n_heads[0]):
                 attns.append(self._attn_head(x, bias_mat=self._supports[0],
                                               split_parts=self.split_parts[0],
-                                              out_sz=self.hid_units[0], activation=lambda x: x,
+                                              out_sz=self.hid_units[0], activation=tf.nn.leaky_relu,
                                               in_drop=self.ffd_drop, coef_drop=self.attn_drop, residual=False,
-                                              name="attn_{}_{}".format("in", i)))
+                                              name="attn_{}_{}".format("in", i), bias_start=bias_start))
             h_1 = tf.concat(attns, axis=-1)
             for i in range(1, len(self.hid_units)):
                 h_old = h_1
@@ -233,7 +233,7 @@ class DCGRUCell(RNNCell):
                 for j in range(self.n_heads[i]):
                     attns.append(self._attn_head(h_1, bias_mat=self._supports[0],
                                                   split_parts=self.split_parts[i],
-                                                  out_sz=self.hid_units[i], activation=lambda x: x,
+                                                  out_sz=self.hid_units[i], activation=tf.nn.leaky_relu,
                                                   in_drop=self.ffd_drop, coef_drop=self.attn_drop, residual=False,
                                                   name="attn_{}_{}".format(i, j)))
                 h_1 = tf.concat(attns, axis=-1)
@@ -252,8 +252,9 @@ class DCGRUCell(RNNCell):
         return tf.reshape(logits, [batch_size, self._num_nodes * output_size])
 
     def _attn_head(self, seq, out_sz, activation, bias_mat=None,split_parts=2,
-                  in_drop=0.0, coef_drop=0.0, residual=False, name="attn"):
+                  in_drop=0.0, coef_drop=0.0, residual=False, name="attn", bias_start=0.0):
         n_nodes = seq.shape[1]
+        dtype = seq.dtype
         with tf.name_scope('my_attn'):
             if in_drop != 0.0:
                 seq = tf.nn.dropout(seq, 1.0 - in_drop)
@@ -286,6 +287,5 @@ class DCGRUCell(RNNCell):
 
             vals = tf.matmul(coefs, seq_fts_sp)  # [sp, bs, n, b]
             vals = tf.reduce_sum(vals, 0)  # [bs, n, b]
-            ret = tf.contrib.layers.bias_add(vals)
 
-            return ret
+            return activation(vals)
