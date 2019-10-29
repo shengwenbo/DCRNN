@@ -124,3 +124,4 @@ class DCRNNModel(object):
     @property
     def outputs(self):
         return self._outputs
+

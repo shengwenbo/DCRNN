@@ -284,4 +284,3 @@ class DCGRUCell(RNNCell):
             vals = tf.reduce_sum(vals, 0)  # [bs, n, b]
             ret = tf.contrib.layers.bias_add(vals)
 
-            return activation(ret)  # activation

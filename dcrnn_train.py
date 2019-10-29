@@ -2,6 +2,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import os
 import argparse
 import tensorflow as tf
 import yaml
@@ -21,6 +22,7 @@ def main(args):
         if args.use_cpu_only:
             tf_config = tf.ConfigProto(device_count={'GPU': 0})
         tf_config.gpu_options.allow_growth = True
+        os.environ["CUDA_VISIBLE_DEVICES"] = str(supervisor_config['gpu'])
         with tf.Session(config=tf_config) as sess:
             supervisor = DCRNNSupervisor(adj_mx=adj_mx, **supervisor_config)
 
