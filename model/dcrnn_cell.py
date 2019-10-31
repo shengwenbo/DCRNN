@@ -45,7 +45,7 @@ class DCGRUCell(RNNCell):
         self._use_gc_for_ru = use_gc_for_ru
         supports = []
         if filter_type == "dense_laplacian":
-            supports.append(utils.calculate_scaled_laplacian_bias_dense(adj_mx, lambda_max=None))
+            supports.append(utils.calculate_adj_list(adj_mx, max_nei=32, lambda_max=None))
             self.n_heads = nheads
             self.hid_units = hid_units
             self.split_parts = split_parts
@@ -213,25 +213,25 @@ class DCGRUCell(RNNCell):
         dtype = inputs.dtype
 
         x = inputs_and_state
+        x = tf.transpose(x, [1, 0 ,2]) # [batch_size, num_nodes, total_arg_size]
         # x0 = tf.transpose(x, perm=[1, 2, 0])  # (num_nodes, total_arg_size, batch_size)
-        # x0 = tf.reshape(x0, shape=[self._num_nodes, input_size * batch_size])
-        # x = tf.expand_dims(x0, axis=0) # (1, num_nodes, total_arg_size * batch_size)
+        # x = tf.reshape(x0, shape=[self._num_nodes, input_size * batch_size])
 
         scope = tf.get_variable_scope()
         with tf.variable_scope(scope):
             attns = []
             for i in range(self.n_heads[0]):
-                attns.append(self._attn_head(x, bias_mat=self._supports[0],
+                attns.append(self._attn_head(x, ids=self._supports[0],
                                               split_parts=self.split_parts[0],
                                               out_sz=self.hid_units[0], activation=tf.nn.leaky_relu,
                                               in_drop=self.ffd_drop, coef_drop=self.attn_drop, residual=False,
-                                              name="attn_{}_{}".format("in", i), bias_start=bias_start))
+                                              name="attn_{}_{}".format("in", i)))
             h_1 = tf.concat(attns, axis=-1)
             for i in range(1, len(self.hid_units)):
                 h_old = h_1
                 attns = []
                 for j in range(self.n_heads[i]):
-                    attns.append(self._attn_head(h_1, bias_mat=self._supports[0],
+                    attns.append(self._attn_head(h_1, ids=self._supports[0],
                                                   split_parts=self.split_parts[i],
                                                   out_sz=self.hid_units[i], activation=tf.nn.leaky_relu,
                                                   in_drop=self.ffd_drop, coef_drop=self.attn_drop, residual=False,
@@ -240,52 +240,86 @@ class DCGRUCell(RNNCell):
 
             out = []
             for i in range(self.n_heads[-1]):
-                out.append(self._attn_head(h_1, bias_mat=self._supports[0],
+                out.append(self._attn_head(h_1, ids=self._supports[0],
                                              split_parts=self.split_parts[-1],
                                              out_sz=output_size, activation=lambda x: x,
                                              in_drop=self.ffd_drop, coef_drop=self.attn_drop, residual=False,
                                              name="attn_{}_{}".format("out", i)))
 
-            logits = tf.add_n(out) / self.n_heads[-1]
+            logits = tf.add_n(out) / self.n_heads[-1] # (1, num_nodes, state_dim*batch_size)
+
+        logits = tf.reshape(logits, [self._num_nodes, output_size, batch_size])
+        logits = tf.transpose(logits, [2, 0, 1])
 
         # Reshape res back to 2D: (batch_size, num_node, state_dim) -> (batch_size, num_node * state_dim)
         return tf.reshape(logits, [batch_size, self._num_nodes * output_size])
 
-    def _attn_head(self, seq, out_sz, activation, bias_mat=None,split_parts=2,
-                  in_drop=0.0, coef_drop=0.0, residual=False, name="attn", bias_start=0.0):
-        n_nodes = seq.shape[1]
-        dtype = seq.dtype
+    def _attn_head(self, seq, ids, out_sz, activation, sparse=False, split_parts=2, attn="simple", sp_wei=None, in_drop=0.0, coef_drop=0.0, residual=False, name="attn"):
+        if attn == "inner":
+            attn = self._attn_inner
+        elif attn == "simple":
+            attn = self._attn_simple
+        else:
+            raise Exception
+
         with tf.name_scope('my_attn'):
+
             if in_drop != 0.0:
-                seq = tf.nn.dropout(seq, 1.0 - in_drop)
+                seq = tf.layers.dropout(seq, 1.0 - in_drop)
 
             seq_fts_sp = []
+            # seq [ns, bs, fd]
+            num_nodes = seq.shape[0]
+            batch_size = seq.shape[1]
             for _ in range(split_parts):
-                seq_fts_sp.append(tf.expand_dims(tf.layers.conv1d(seq, out_sz, 1, use_bias=False), 0))
-            seq_fts_sp = tf.concat(seq_fts_sp, 0)
-            seq_fts = tf.reduce_mean(seq_fts_sp, 0)
+                sf = tf.layers.conv1d(seq, out_sz, 1, use_bias=False)  # [ns, bs, d]
+                sf = tf.nn.embedding_lookup(tf.reshape(sf, [num_nodes, -1]), ids) # [ns, n, bs * d]
+                seq_fts_sp.append(sf)
+            seq_fts_sp = tf.stack(seq_fts_sp, 2)  # [ns, n, sp, bs * d]
+            seq_fts_sp = tf.reshape(seq_fts_sp, [num_nodes, -1, split_parts, batch_size, out_sz])
+            seq_fts_sp = tf.transpose(seq_fts_sp, [3, 0, 1, 2, 4]) # [bs, ns, n, sp, d]
+            seq_fts_sp = tf.reshape(seq_fts_sp, [batch_size * num_nodes, -1, split_parts, out_sz]) # [bs * ns, n, sp, d]
+            sfs_bk = seq_fts_sp
+            seq_fts = tf.reduce_mean(seq_fts_sp, 2)  # [bs * ns, n, bs * d]
+
+            cnt_fts = seq_fts[:, 0:1, :]  # [bs * ns, 1, d]
 
             # simplest self-attention possible
-            f_1 = tf.layers.conv1d(seq_fts, 1, 1)  # [bs, n, 1]
-            f_2 = tf.reshape(seq_fts_sp, [-1, n_nodes, out_sz])  # [sp*bs, n, d]
-            f_2 = tf.layers.conv1d(f_2, 1, 1)  # [sp*bs, n, 1]
-            f_2 = tf.reshape(f_2, [split_parts, -1, n_nodes, 1])  # [sp, bs, n, 1]
-            logits = tf.expand_dims(f_1, 0) + tf.transpose(f_2, [0, 1, 3, 2])  # [sp, bs, n, n]
-            in_coefs = tf.nn.softmax(tf.nn.leaky_relu(logits), axis=0)  # [sp, bs, n, n]
-            logits = in_coefs * logits
-            if bias_mat is not None:
-                coefs = tf.nn.softmax(tf.nn.leaky_relu(tf.reduce_sum(logits, axis=0)) + bias_mat)  # [bs, n, n]
-            else:
-                coefs = tf.nn.softmax(tf.nn.leaky_relu(tf.reduce_sum(logits, axis=0)))  # [bs, n, n]
-            coefs = tf.expand_dims(coefs, 0)  # [1, bs, n, n]
-            coefs = coefs * in_coefs  # [sp, bs, n, n]
+            logits = attn(tf.expand_dims(cnt_fts, 1), seq_fts_sp, 4, name)  # [bs * ns, n, 1, sp]
+            in_coefs = tf.nn.softmax(tf.nn.leaky_relu(logits), axis=-1)  # [bs * ns, n, 1, sp]
+
+            logits = in_coefs * logits  # [bs * ns, n, 1, sp]
+            coefs = tf.nn.softmax(tf.nn.leaky_relu(tf.reduce_sum(logits, axis=-1)))  # [bs * ns, n, 1]
+            coefs = tf.expand_dims(coefs, -1)  # [bs * ns, n, 1, 1]
+            coefs = coefs * in_coefs  # [bs * ns, n, 1, sp]
 
             if coef_drop != 0.0:
                 coefs = tf.nn.dropout(coefs, 1.0 - coef_drop)
             if in_drop != 0.0:
                 seq_fts_sp = tf.nn.dropout(seq_fts_sp, 1.0 - in_drop)
 
-            vals = tf.matmul(coefs, seq_fts_sp)  # [sp, bs, n, b]
-            vals = tf.reduce_sum(vals, 0)  # [bs, n, b]
+            vals = tf.matmul(coefs, seq_fts_sp)  # [bs * ns, n, 1, d]
+            ret = tf.reduce_sum(vals, axis=1)  # [bs * ns, 1, d]
+            ret = tf.reshape(ret, [batch_size, num_nodes, out_sz]) # [bs, ns, d]
+            ret = tf.transpose(ret, [1, 0, 2]) # [ns, bs, d]
 
-            return activation(vals)
+            return activation(ret)  # activation
+
+    def _attn_inner(self, f1, f2, attn_size, name):
+
+        f1 = tf.layers.dense(f1, attn_size, use_bias=False, name=name + "_attn_inner", reuse=tf.AUTO_REUSE)
+        f2 = tf.layers.dense(f2, attn_size, use_bias=False, name=name + "_attn_inner", reuse=tf.AUTO_REUSE)
+        logits = f1 * f2
+        logits = tf.reduce_sum(logits, -1)
+        logits = tf.expand_dims(logits, -2)
+
+        return logits
+
+    def _attn_simple(self, f1, f2, attn_size, name):
+
+        f1 = tf.layers.dense(f1, 1, use_bias=False, name=name + "_attn_inner", reuse=tf.AUTO_REUSE)
+        f2 = tf.layers.dense(f2, 1, use_bias=False, name=name + "_attn_inner", reuse=tf.AUTO_REUSE)
+        logits = f1 + f2
+        logits = tf.transpose(logits, [0, 1, 3, 2])
+
+        return logits
