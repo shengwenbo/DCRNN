@@ -156,7 +156,6 @@ class DCRNNSupervisor(object):
                 model.labels: y,
             }
 
-            print("!")
             vals = sess.run(fetches, feed_dict=feed_dict)
 
             losses.append(vals['loss'])
