@@ -10,7 +10,7 @@ from scipy.sparse import linalg
 
 
 class DataLoader(object):
-    def __init__(self, xs, ys, batch_size, pad_with_last_sample=True, shuffle=False):
+    def __init__(self, xs, ys, batch_size, pad_with_last_sample=True, shuffle=False, sample_proporation=1.0):
         """
 
         :param xs:
@@ -26,7 +26,7 @@ class DataLoader(object):
             y_padding = np.repeat(ys[-1:], num_padding, axis=0)
             xs = np.concatenate([xs, x_padding], axis=0)
             ys = np.concatenate([ys, y_padding], axis=0)
-        self.size = len(xs)
+        self.size = len(xs) * sample_proporation
         self.num_batch = int(self.size // self.batch_size)
         if shuffle:
             permutation = np.random.permutation(self.size)
@@ -231,7 +231,7 @@ def load_dataset(dataset_dir, batch_size, test_batch_size=None, **kwargs):
     for category in ['train', 'val', 'test']:
         data['x_' + category][..., 0] = scaler.transform(data['x_' + category][..., 0])
         data['y_' + category][..., 0] = scaler.transform(data['y_' + category][..., 0])
-    data['train_loader'] = DataLoader(data['x_train'], data['y_train'], batch_size, shuffle=True)
+    data['train_loader'] = DataLoader(data['x_train'], data['y_train'], batch_size, shuffle=True, sample_proporation=0.1)
     data['val_loader'] = DataLoader(data['x_val'], data['y_val'], test_batch_size, shuffle=False)
     data['test_loader'] = DataLoader(data['x_test'], data['y_test'], test_batch_size, shuffle=False)
     data['scaler'] = scaler
