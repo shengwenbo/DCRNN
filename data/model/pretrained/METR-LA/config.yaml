@@ -2,10 +2,10 @@ base_dir: data/model
 log_level: INFO
 gpu: 0
 data:
-  batch_size: 64
+  batch_size: 2
   dataset_dir: data/METR-LA
   graph_pkl_filename: data/sensor_graph/adj_mx_unix.pkl
-  test_batch_size: 64
+  test_batch_size: 1
 model:
   cl_decay_steps: 2000
   filter_type: dense_laplacian
@@ -19,7 +19,7 @@ model:
   rnn_units: 64
   seq_len: 12
   use_curriculum_learning: true
-  nheads: [4, 4]
+  nheads: [1, 1]
   hid_units: [16]
   split_parts: [4, 4]
   ffd_drop: 0.6

@@ -141,6 +141,36 @@ def calculate_scaled_laplacian_bias_dense(adj_mx, lambda_max=2, undirected=True)
     return L * -1e9
 
 
+def calculate_adj_list(adj_mx, max_nei=64, lambda_max=2, undirected=True):
+    if undirected:
+        adj_mx = np.maximum.reduce([adj_mx, adj_mx.T])
+    L = calculate_normalized_laplacian(adj_mx)
+    if lambda_max is None:
+        lambda_max, _ = linalg.eigsh(L, 1, which='LM')
+        lambda_max = lambda_max[0]
+    L = sp.csr_matrix(L)
+    M, _ = L.shape
+    I = sp.identity(M, format='csr', dtype=L.dtype)
+    L = (2 / lambda_max * L) - I
+    adj = ((L!=0).astype(np.float32).todense())
+    adj = np.array(adj)
+
+    nb_nodes = adj.shape[-1]
+    neighbors = []
+    ids = []
+    adj += np.eye(adj.shape[0], adj.shape[1])
+    for id in range(0, nb_nodes):
+        nei = np.argwhere(adj[id, :])
+        nei = nei.reshape(nei.shape[0])
+        if nei.shape[0] > max_nei:
+            ids.append((id, nei.shape[0]))
+            nei = nei[0:max_nei]
+        else:
+            nei = np.pad(nei, (0, max_nei - nei.shape[0]), mode="constant", constant_values=0)
+        neighbors.append(nei)
+    return np.stack(neighbors)
+
+
 def config_logging(log_dir, log_filename='info.log', level=logging.INFO):
     # Add file handler and stdout handler
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')

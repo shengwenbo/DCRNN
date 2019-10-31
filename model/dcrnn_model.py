@@ -51,13 +51,13 @@ class DCRNNModel(object):
         # GO_SYMBOL = tf.zeros(shape=(batch_size, num_nodes * input_dim))
         GO_SYMBOL = tf.zeros(shape=(batch_size, num_nodes * output_dim))
 
-        cell = DCGRUCell(rnn_units, adj_mx, max_diffusion_step=max_diffusion_step, num_nodes=num_nodes,
-                         filter_type=filter_type, nheads=nheads, hid_units=hid_units, split_parts=split_parts, ffd_drop=ffd_drop, attn_drop=attn_drop)
-        cell_with_projection = DCGRUCell(rnn_units, adj_mx, max_diffusion_step=max_diffusion_step, num_nodes=num_nodes,
+        encoding_cells = [DCGRUCell(rnn_units, adj_mx, max_diffusion_step=max_diffusion_step, num_nodes=num_nodes,
+                         filter_type=filter_type, nheads=nheads, hid_units=hid_units, split_parts=split_parts, ffd_drop=ffd_drop, attn_drop=attn_drop) for _ in range(num_rnn_layers)]
+        decoding_cells = [DCGRUCell(rnn_units, adj_mx, max_diffusion_step=max_diffusion_step, num_nodes=num_nodes,
+                         filter_type=filter_type, nheads=nheads, hid_units=hid_units, split_parts=split_parts, ffd_drop=ffd_drop, attn_drop=attn_drop) for _ in range(num_rnn_layers - 1)] \
+                         + [DCGRUCell(rnn_units, adj_mx, max_diffusion_step=max_diffusion_step, num_nodes=num_nodes,
                                          num_proj=output_dim, filter_type=filter_type,
-                                         nheads=nheads, hid_units=hid_units, split_parts=split_parts, ffd_drop=ffd_drop, attn_drop=attn_drop)
-        encoding_cells = [cell] * num_rnn_layers
-        decoding_cells = [cell] * (num_rnn_layers - 1) + [cell_with_projection]
+                                         nheads=nheads, hid_units=hid_units, split_parts=split_parts, ffd_drop=ffd_drop, attn_drop=attn_drop)]
         encoding_cells = tf.contrib.rnn.MultiRNNCell(encoding_cells, state_is_tuple=True)
         decoding_cells = tf.contrib.rnn.MultiRNNCell(decoding_cells, state_is_tuple=True)
 
