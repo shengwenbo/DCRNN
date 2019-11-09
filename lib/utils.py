@@ -26,7 +26,7 @@ class DataLoader(object):
             y_padding = np.repeat(ys[-1:], num_padding, axis=0)
             xs = np.concatenate([xs, x_padding], axis=0)
             ys = np.concatenate([ys, y_padding], axis=0)
-        self.size = len(xs) * sample_proporation
+        self.size = int(len(xs) * sample_proporation)
         self.num_batch = int(self.size // self.batch_size)
         if shuffle:
             permutation = np.random.permutation(self.size)
